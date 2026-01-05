@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../providers/app_provider.dart';
+import '../providers/theme_provider.dart';
 import '../models/account.dart';
 import '../models/transaction.dart';
 import 'history_screen.dart';
 import 'insights_screen.dart';
+import 'settings_screen.dart';
 
 /// Home/Dashboard screen showing net amount, balances, and today's delta
 class HomeScreen extends StatefulWidget {
@@ -87,6 +89,35 @@ class _HomeScreenState extends State<HomeScreen> {
                 expandedHeight: 120,
                 floating: false,
                 pinned: true,
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.settings),
+                    tooltip: 'Notification Settings',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const SettingsScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  Consumer<ThemeProvider>(
+                    builder: (context, themeProvider, _) {
+                      return IconButton(
+                        icon: Icon(
+                          themeProvider.isDarkMode
+                              ? Icons.light_mode
+                              : Icons.dark_mode,
+                        ),
+                        tooltip: themeProvider.isDarkMode
+                            ? 'Switch to Light Mode'
+                            : 'Switch to Dark Mode',
+                        onPressed: () => themeProvider.toggleTheme(),
+                      );
+                    },
+                  ),
+                ],
                 flexibleSpace: FlexibleSpaceBar(
                   title: const Text('Expense Tracker'),
                   background: Container(

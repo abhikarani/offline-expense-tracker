@@ -21,6 +21,7 @@ class Transaction {
   final double amount;
   final String account; // Bank, Cash, or Wallet
   final String tag;
+  final bool isEssential; // Essential vs Non-Essential spending
   final double moneyback; // Amount expected to get back
   final String remarks;
   final double delta; // Calculated: +amount for credit, -amount for debit
@@ -33,6 +34,7 @@ class Transaction {
     required this.amount,
     required this.account,
     required this.tag,
+    this.isEssential = true,
     this.moneyback = 0.0,
     this.remarks = '',
     required this.delta,
@@ -47,6 +49,7 @@ class Transaction {
       'amount': amount,
       'account': account,
       'tag': tag,
+      'isEssential': isEssential ? 1 : 0,
       'moneyback': moneyback,
       'remarks': remarks,
       'delta': delta,
@@ -62,6 +65,7 @@ class Transaction {
       amount: map['amount'] as double,
       account: map['account'] as String,
       tag: map['tag'] as String,
+      isEssential: (map['isEssential'] as int?) == 1,
       moneyback: map['moneyback'] as double,
       remarks: map['remarks'] as String,
       delta: map['delta'] as double,
@@ -76,6 +80,7 @@ class Transaction {
     double? amount,
     String? account,
     String? tag,
+    bool? isEssential,
     double? moneyback,
     String? remarks,
     double? delta,
@@ -88,6 +93,7 @@ class Transaction {
       amount: amount ?? this.amount,
       account: account ?? this.account,
       tag: tag ?? this.tag,
+      isEssential: isEssential ?? this.isEssential,
       moneyback: moneyback ?? this.moneyback,
       remarks: remarks ?? this.remarks,
       delta: delta ?? this.delta,

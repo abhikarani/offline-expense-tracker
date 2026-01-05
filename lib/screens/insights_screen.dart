@@ -59,6 +59,14 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
               // Account Distribution
               _buildAccountDistribution(provider),
+              const SizedBox(height: 24),
+
+              // Essential vs Non-Essential Spending (Pie Chart)
+              _buildEssentialVsNonEssentialSection(provider),
+              const SizedBox(height: 24),
+
+              // Monthly Spending (Bar Chart)
+              _buildMonthlySpendingSection(provider),
             ],
           ),
         );
@@ -472,5 +480,266 @@ class _InsightsScreenState extends State<InsightsScreen> {
       default:
         return Colors.grey;
     }
+  }
+
+  Widget _buildEssentialVsNonEssentialSection(AppProvider provider) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Essential vs Non-Essential',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            FutureBuilder<Map<String, double>>(
+              future: provider.getEssentialVsNonEssentialSpending(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(32.0),
+                      child: CircularProgressIndicator(),
+                    ),
+                  );
+                }
+
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return _buildEmptyChartState('No spending data available');
+                }
+
+                final data = snapshot.data!;
+                final essential = data['Essential'] ?? 0.0;
+                final nonEssential = data['Non-Essential'] ?? 0.0;
+                final total = essential + nonEssential;
+
+                if (total == 0) {
+                  return _buildEmptyChartState('No spending data available');
+                }
+
+                return Column(
+                  children: [
+                    SizedBox(
+                      height: 200,
+                      child: PieChart(
+                        PieChartData(
+                          sections: [
+                            PieChartSectionData(
+                              value: essential,
+                              title: '${((essential / total) * 100).toStringAsFixed(1)}%',
+                              color: Colors.green,
+                              radius: 80,
+                              titleStyle: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                            PieChartSectionData(
+                              value: nonEssential,
+                              title: '${((nonEssential / total) * 100).toStringAsFixed(1)}%',
+                              color: Colors.orange,
+                              radius: 80,
+                              titleStyle: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                          centerSpaceRadius: 40,
+                          sectionsSpace: 2,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _buildLegendItem('Essential', Colors.green, essential),
+                        _buildLegendItem('Non-Essential', Colors.orange, nonEssential),
+                      ],
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMonthlySpendingSection(AppProvider provider) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Monthly Spending',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Last 12 months',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey,
+              ),
+            ),
+            const SizedBox(height: 16),
+            FutureBuilder<Map<String, double>>(
+              future: provider.getMonthlySpending(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(32.0),
+                      child: CircularProgressIndicator(),
+                    ),
+                  );
+                }
+
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return _buildEmptyChartState('No spending data available');
+                }
+
+                final data = snapshot.data!;
+                final months = data.keys.toList().reversed.toList();
+                final maxSpending = data.values.reduce((a, b) => a > b ? a : b);
+
+                return SizedBox(
+                  height: 250,
+                  child: BarChart(
+                    BarChartData(
+                      alignment: BarChartAlignment.spaceAround,
+                      maxY: maxSpending * 1.2,
+                      barGroups: months.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final month = entry.value;
+                        final amount = data[month] ?? 0.0;
+
+                        return BarChartGroupData(
+                          x: index,
+                          barRods: [
+                            BarChartRodData(
+                              toY: amount,
+                              color: Colors.blue,
+                              width: 16,
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(4),
+                              ),
+                            ),
+                          ],
+                        );
+                      }).toList(),
+                      titlesData: FlTitlesData(
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 50,
+                            getTitlesWidget: (value, meta) {
+                              return Text(
+                                _formatCompactNumber(value),
+                                style: const TextStyle(fontSize: 10),
+                              );
+                            },
+                          ),
+                        ),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            getTitlesWidget: (value, meta) {
+                              if (value.toInt() >= months.length) {
+                                return const Text('');
+                              }
+                              final month = months[value.toInt()];
+                              final parts = month.split('-');
+                              if (parts.length == 2) {
+                                return Text(
+                                  '${parts[1]}/${parts[0].substring(2)}',
+                                  style: const TextStyle(fontSize: 10),
+                                );
+                              }
+                              return const Text('');
+                            },
+                          ),
+                        ),
+                        rightTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        topTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                      ),
+                      gridData: FlGridData(
+                        show: true,
+                        drawVerticalLine: false,
+                        horizontalInterval: maxSpending / 5,
+                      ),
+                      borderData: FlBorderData(show: false),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLegendItem(String label, Color color, double amount) {
+    return Row(
+      children: [
+        Container(
+          width: 16,
+          height: 16,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            Text(
+              NumberFormat.currency(symbol: '₹', decimalDigits: 0).format(amount),
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  String _formatCompactNumber(double value) {
+    if (value >= 100000) {
+      return '${(value / 100000).toStringAsFixed(1)}L';
+    } else if (value >= 1000) {
+      return '${(value / 1000).toStringAsFixed(1)}K';
+    }
+    return value.toStringAsFixed(0);
   }
 }

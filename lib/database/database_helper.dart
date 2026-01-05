@@ -23,8 +23,9 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDB,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -46,6 +47,7 @@ class DatabaseHelper {
         amount REAL NOT NULL,
         account TEXT NOT NULL,
         tag TEXT NOT NULL,
+        isEssential INTEGER NOT NULL DEFAULT 1,
         moneyback REAL NOT NULL DEFAULT 0,
         remarks TEXT NOT NULL DEFAULT '',
         delta REAL NOT NULL,
@@ -54,10 +56,57 @@ class DatabaseHelper {
       )
     ''');
 
+    // Tags table
+    await db.execute('''
+      CREATE TABLE tags (
+        name TEXT PRIMARY KEY,
+        isActive INTEGER NOT NULL DEFAULT 1
+      )
+    ''');
+
     // Create indexes for better query performance
     await db.execute('CREATE INDEX idx_transactions_date ON transactions(date)');
     await db.execute('CREATE INDEX idx_transactions_account ON transactions(account)');
     await db.execute('CREATE INDEX idx_transactions_tag ON transactions(tag)');
+
+    // Initialize default tags
+    await _initializeDefaultTags(db);
+  }
+
+  Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Add isEssential column to transactions
+      await db.execute('''
+        ALTER TABLE transactions ADD COLUMN isEssential INTEGER NOT NULL DEFAULT 1
+      ''');
+
+      // Create tags table
+      await db.execute('''
+        CREATE TABLE tags (
+          name TEXT PRIMARY KEY,
+          isActive INTEGER NOT NULL DEFAULT 1
+        )
+      ''');
+
+      // Initialize default tags
+      await _initializeDefaultTags(db);
+    }
+  }
+
+  Future _initializeDefaultTags(Database db) async {
+    final defaultTags = [
+      'Self',
+      'Food Vendor',
+      'Split Received',
+      'Playo',
+      'Blinkit',
+      'Uber',
+      'Swiggy',
+    ];
+
+    for (final tagName in defaultTags) {
+      await db.insert('tags', {'name': tagName, 'isActive': 1});
+    }
   }
 
   // ==================== ACCOUNT OPERATIONS ====================
@@ -120,6 +169,133 @@ class DatabaseHelper {
     return result.isNotEmpty;
   }
 
+  /// Add a new account
+  Future<void> addAccount(String name, double initialBalance) async {
+    final db = await database;
+    await db.insert('accounts', {
+      'name': name,
+      'balance': initialBalance,
+    });
+  }
+
+  /// Delete an account (only if it has no transactions)
+  Future<void> deleteAccount(String name) async {
+    final db = await database;
+    await db.delete(
+      'accounts',
+      where: 'name = ?',
+      whereArgs: [name],
+    );
+  }
+
+  /// Rename an account (updates both accounts table and all transactions)
+  Future<void> renameAccount(String oldName, String newName) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      // Get the old account balance
+      final result = await txn.query(
+        'accounts',
+        where: 'name = ?',
+        whereArgs: [oldName],
+      );
+
+      if (result.isEmpty) return;
+
+      final balance = result.first['balance'] as double;
+
+      // Delete old account
+      await txn.delete(
+        'accounts',
+        where: 'name = ?',
+        whereArgs: [oldName],
+      );
+
+      // Insert new account with same balance
+      await txn.insert('accounts', {
+        'name': newName,
+        'balance': balance,
+      });
+
+      // Update all transactions with this account
+      await txn.update(
+        'transactions',
+        {'account': newName},
+        where: 'account = ?',
+        whereArgs: [oldName],
+      );
+    });
+  }
+
+  /// Check if an account has any transactions
+  Future<bool> accountHasTransactions(String accountName) async {
+    final db = await database;
+    final result = await db.query(
+      'transactions',
+      where: 'account = ?',
+      whereArgs: [accountName],
+      limit: 1,
+    );
+    return result.isNotEmpty;
+  }
+
+  // ==================== TRANSACTION OPERATIONS ====================
+
+  // ==================== TAG OPERATIONS ====================
+
+  /// Get all active tags
+  Future<List<String>> getActiveTags() async {
+    final db = await database;
+    final result = await db.query(
+      'tags',
+      where: 'isActive = ?',
+      whereArgs: [1],
+      orderBy: 'name ASC',
+    );
+    return result.map((row) => row['name'] as String).toList();
+  }
+
+  /// Get all tags (including inactive)
+  Future<List<String>> getAllTagNames() async {
+    final db = await database;
+    final result = await db.query('tags', orderBy: 'name ASC');
+    return result.map((row) => row['name'] as String).toList();
+  }
+
+  /// Add a new tag
+  Future<void> addTag(String name) async {
+    final db = await database;
+    await db.insert('tags', {'name': name, 'isActive': 1});
+  }
+
+  /// Delete a tag (soft delete by marking as inactive)
+  Future<void> deleteTag(String name) async {
+    final db = await database;
+    await db.update(
+      'tags',
+      {'isActive': 0},
+      where: 'name = ?',
+      whereArgs: [name],
+    );
+  }
+
+  /// Rename a tag (updates both tags table and all transactions)
+  Future<void> renameTag(String oldName, String newName) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      // Update tags table
+      await txn.delete('tags', where: 'name = ?', whereArgs: [oldName]);
+      await txn.insert('tags', {'name': newName, 'isActive': 1});
+
+      // Update all transactions with this tag
+      await txn.update(
+        'transactions',
+        {'tag': newName},
+        where: 'tag = ?',
+        whereArgs: [oldName],
+      );
+    });
+  }
+
   // ==================== TRANSACTION OPERATIONS ====================
 
   /// Add a new transaction and update account balance
@@ -130,6 +306,7 @@ class DatabaseHelper {
     required double amount,
     required String account,
     required String tag,
+    bool isEssential = true,
     double moneyback = 0.0,
     String remarks = '',
   }) async {
@@ -158,6 +335,7 @@ class DatabaseHelper {
       amount: amount,
       account: account,
       tag: tag,
+      isEssential: isEssential,
       moneyback: moneyback,
       remarks: remarks,
       delta: delta,
@@ -266,12 +444,13 @@ class DatabaseHelper {
 
   /// Get spending by tag (for insights)
   /// Returns map of tag -> total debit amount
+  /// Excludes "Self" tag as it represents transfers, not spending
   Future<Map<String, double>> getSpendingByTag() async {
     final db = await database;
     final result = await db.rawQuery('''
       SELECT tag, SUM(amount) as total
       FROM transactions
-      WHERE type = 'debit'
+      WHERE type = 'debit' AND tag != 'Self'
       GROUP BY tag
       ORDER BY total DESC
     ''');
@@ -281,6 +460,71 @@ class DatabaseHelper {
       spending[row['tag'] as String] = row['total'] as double;
     }
     return spending;
+  }
+
+  /// Get essential vs non-essential spending
+  /// Returns map with 'essential' and 'non-essential' keys
+  /// Excludes "Self" tag as it represents transfers, not spending
+  Future<Map<String, double>> getEssentialVsNonEssentialSpending() async {
+    final db = await database;
+    final result = await db.rawQuery('''
+      SELECT
+        CASE WHEN isEssential = 1 THEN 'Essential' ELSE 'Non-Essential' END as category,
+        SUM(amount) as total
+      FROM transactions
+      WHERE type = 'debit' AND tag != 'Self'
+      GROUP BY isEssential
+    ''');
+
+    final Map<String, double> spending = {'Essential': 0.0, 'Non-Essential': 0.0};
+    for (var row in result) {
+      spending[row['category'] as String] = row['total'] as double;
+    }
+    return spending;
+  }
+
+  /// Get monthly spending (last 12 months)
+  /// Returns map of 'YYYY-MM' -> total debit amount
+  /// Excludes "Self" tag as it represents transfers, not spending
+  Future<Map<String, double>> getMonthlySpending() async {
+    final db = await database;
+    final result = await db.rawQuery('''
+      SELECT
+        strftime('%Y-%m', date) as month,
+        SUM(amount) as total
+      FROM transactions
+      WHERE type = 'debit' AND tag != 'Self'
+      GROUP BY month
+      ORDER BY month DESC
+      LIMIT 12
+    ''');
+
+    final Map<String, double> spending = {};
+    for (var row in result) {
+      spending[row['month'] as String] = row['total'] as double;
+    }
+    return spending;
+  }
+
+  /// Get monthly net worth (last 12 months)
+  /// Returns map of 'YYYY-MM' -> net worth at end of month
+  Future<Map<String, double>> getMonthlyNetWorth() async {
+    final db = await database;
+    final result = await db.rawQuery('''
+      SELECT
+        strftime('%Y-%m', date) as month,
+        MAX(net) as net_at_month_end
+      FROM transactions
+      GROUP BY month
+      ORDER BY month DESC
+      LIMIT 12
+    ''');
+
+    final Map<String, double> netWorth = {};
+    for (var row in result) {
+      netWorth[row['month'] as String] = row['net_at_month_end'] as double;
+    }
+    return netWorth;
   }
 
   /// Get net worth over time (for insights chart)
@@ -333,6 +577,7 @@ class DatabaseHelper {
     required double amount,
     required String account,
     required String tag,
+    bool isEssential = true,
     double moneyback = 0,
     String remarks = '',
   }) async {
@@ -378,6 +623,7 @@ class DatabaseHelper {
         'amount': amount,
         'account': account,
         'tag': tag,
+        'isEssential': isEssential ? 1 : 0,
         'moneyback': moneyback,
         'remarks': remarks,
         'delta': newDelta,

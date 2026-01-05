@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 
 import '../providers/app_provider.dart';
 import '../models/transaction.dart';
+import 'tag_management_screen.dart';
+import 'account_management_screen.dart';
 
 /// Screen for adding OR editing a transaction
 class AddTransactionScreen extends StatefulWidget {
@@ -24,14 +26,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   late TransactionType _type;
   final _amountController = TextEditingController();
   late String _selectedAccount;
-  final _tagController = TextEditingController();
+  String? _selectedTag;
+  late bool _isEssential;
   final _moneybackController = TextEditingController();
   final _remarksController = TextEditingController();
 
   bool _isLoading = false;
-  List<String> _recentTags = [];
-
-  final List<String> _accounts = ['Bank', 'Cash', 'Wallet'];
+  List<String> _availableTags = [];
+  List<String> _availableAccounts = [];
 
   bool get _isEdit => widget.transaction != null;
 
@@ -39,6 +41,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   void initState() {
     super.initState();
     _loadRecentTags();
+    _loadAccounts();
     _initForm();
   }
 
@@ -49,27 +52,55 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _type = tx.type;
       _selectedAccount = tx.account;
       _amountController.text = tx.amount.toString();
-      _tagController.text = tx.tag;
+      _selectedTag = tx.tag;
+      _isEssential = tx.isEssential;
       _moneybackController.text = tx.moneyback.toString();
       _remarksController.text = tx.remarks;
     } else {
       _selectedDate = DateTime.now();
       _type = TransactionType.debit;
-      _selectedAccount = 'Bank';
+      // Will be set when accounts load
+      _isEssential = true;
       _moneybackController.text = '0';
     }
   }
 
+  Future<void> _loadAccounts() async {
+    final provider = context.read<AppProvider>();
+    final accounts = provider.accounts.map((a) => a.name).toList();
+    setState(() {
+      _availableAccounts = accounts;
+      // Set first account as default if adding new transaction
+      if (!_isEdit && accounts.isNotEmpty) {
+        _selectedAccount = accounts.first;
+      }
+      // Fix for editing transactions with deleted accounts
+      if (_isEdit && !accounts.contains(_selectedAccount)) {
+        _selectedAccount = accounts.isNotEmpty ? accounts.first : '';
+      }
+    });
+  }
+
   Future<void> _loadRecentTags() async {
     final provider = context.read<AppProvider>();
-    final tags = await provider.getAllTags();
-    setState(() => _recentTags = tags);
+    final tags = await provider.getActiveTags();
+    setState(() {
+      _availableTags = tags;
+      // Set first tag as default if adding new transaction
+      if (!_isEdit && _selectedTag == null && tags.isNotEmpty) {
+        _selectedTag = tags.first;
+      }
+      // Fix for editing transactions with old tags (like "NA")
+      // that don't exist in the new tag system
+      if (_isEdit && _selectedTag != null && !tags.contains(_selectedTag)) {
+        _selectedTag = tags.isNotEmpty ? tags.first : null;
+      }
+    });
   }
 
   @override
   void dispose() {
     _amountController.dispose();
-    _tagController.dispose();
     _moneybackController.dispose();
     _remarksController.dispose();
     super.dispose();
@@ -77,6 +108,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   Future<void> _saveTransaction() async {
     if (!_formKey.currentState!.validate()) return;
+
+    if (_selectedTag == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a tag')),
+      );
+      return;
+    }
 
     setState(() => _isLoading = true);
 
@@ -90,7 +128,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           type: _type,
           amount: double.parse(_amountController.text),
           account: _selectedAccount,
-          tag: _tagController.text.trim(),
+          tag: _selectedTag!,
+          isEssential: _isEssential,
           moneyback: double.parse(_moneybackController.text),
           remarks: _remarksController.text.trim(),
         );
@@ -100,7 +139,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           type: _type,
           amount: double.parse(_amountController.text),
           account: _selectedAccount,
-          tag: _tagController.text.trim(),
+          tag: _selectedTag!,
+          isEssential: _isEssential,
           moneyback: double.parse(_moneybackController.text),
           remarks: _remarksController.text.trim(),
         );
@@ -215,20 +255,85 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   : null,
             ),
             const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: _selectedAccount,
-              items: _accounts
-                  .map((a) => DropdownMenuItem(value: a, child: Text(a)))
-                  .toList(),
-              onChanged: (v) => setState(() => _selectedAccount = v!),
-              decoration: const InputDecoration(labelText: 'Account *'),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedAccount,
+                    items: _availableAccounts
+                        .map((a) => DropdownMenuItem(value: a, child: Text(a)))
+                        .toList(),
+                    onChanged: (v) => setState(() => _selectedAccount = v!),
+                    decoration: const InputDecoration(
+                      labelText: 'Account *',
+                      prefixIcon: Icon(Icons.account_balance),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.settings),
+                  tooltip: 'Manage Accounts',
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AccountManagementScreen(),
+                      ),
+                    );
+                    // Reload accounts after returning from account management
+                    await _loadAccounts();
+                  },
+                ),
+              ],
             ),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: _tagController,
-              decoration: const InputDecoration(labelText: 'Tag *'),
-              validator: (v) =>
-                  v == null || v.trim().isEmpty ? 'Enter tag' : null,
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedTag,
+                    items: _availableTags
+                        .map((tag) => DropdownMenuItem(
+                              value: tag,
+                              child: Text(tag),
+                            ))
+                        .toList(),
+                    onChanged: (v) => setState(() => _selectedTag = v),
+                    decoration: const InputDecoration(
+                      labelText: 'Tag *',
+                      prefixIcon: Icon(Icons.label),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.settings),
+                  tooltip: 'Manage Tags',
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const TagManagementScreen(),
+                      ),
+                    );
+                    // Reload tags after returning from tag management
+                    await _loadRecentTags();
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Essential/Non-Essential toggle
+            SwitchListTile(
+              title: const Text('Essential Expense'),
+              subtitle: Text(
+                _isEssential
+                    ? 'This is an essential expense'
+                    : 'This is a non-essential expense',
+              ),
+              value: _isEssential,
+              onChanged: (value) => setState(() => _isEssential = value),
+              activeThumbColor: Colors.green,
+              inactiveThumbColor: Colors.orange,
             ),
             const SizedBox(height: 16),
             TextFormField(

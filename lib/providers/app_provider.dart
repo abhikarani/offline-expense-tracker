@@ -75,6 +75,7 @@ class AppProvider extends ChangeNotifier {
     required double amount,
     required String account,
     required String tag,
+    bool isEssential = true,
     double moneyback = 0.0,
     String remarks = '',
   }) async {
@@ -84,6 +85,7 @@ class AppProvider extends ChangeNotifier {
       amount: amount,
       account: account,
       tag: tag,
+      isEssential: isEssential,
       moneyback: moneyback,
       remarks: remarks,
     );
@@ -104,6 +106,29 @@ class AppProvider extends ChangeNotifier {
     } catch (e) {
       return null;
     }
+  }
+
+  /// Add a new account
+  Future<void> addAccount(String name, double initialBalance) async {
+    await _db.addAccount(name, initialBalance);
+    await initialize();
+  }
+
+  /// Delete an account
+  Future<void> deleteAccount(String name) async {
+    await _db.deleteAccount(name);
+    await initialize();
+  }
+
+  /// Rename an account
+  Future<void> renameAccount(String oldName, String newName) async {
+    await _db.renameAccount(oldName, newName);
+    await initialize();
+  }
+
+  /// Check if account has transactions
+  Future<bool> accountHasTransactions(String accountName) async {
+    return await _db.accountHasTransactions(accountName);
   }
 
   /// Delete a transaction
@@ -135,6 +160,21 @@ class AppProvider extends ChangeNotifier {
     return await _db.getSpendingByTag();
   }
 
+  /// Get essential vs non-essential spending
+  Future<Map<String, double>> getEssentialVsNonEssentialSpending() async {
+    return await _db.getEssentialVsNonEssentialSpending();
+  }
+
+  /// Get monthly spending (last 12 months)
+  Future<Map<String, double>> getMonthlySpending() async {
+    return await _db.getMonthlySpending();
+  }
+
+  /// Get monthly net worth (last 12 months)
+  Future<Map<String, double>> getMonthlyNetWorth() async {
+    return await _db.getMonthlyNetWorth();
+  }
+
   /// Get net worth history (for insights chart)
   Future<List<Transaction>> getNetWorthHistory() async {
     return await _db.getNetWorthHistory();
@@ -153,6 +193,7 @@ class AppProvider extends ChangeNotifier {
     required double amount,
     required String account,
     required String tag,
+    bool isEssential = true,
     double moneyback = 0.0,
     String remarks = '',
   }) async {
@@ -163,11 +204,35 @@ class AppProvider extends ChangeNotifier {
       amount: amount,
       account: account,
       tag: tag,
+      isEssential: isEssential,
       moneyback: moneyback,
       remarks: remarks,
     );
 
     // Reload all data to keep UI consistent
     await initialize();
+  }
+
+  // ==================== TAG OPERATIONS ====================
+
+  /// Get all active tags
+  Future<List<String>> getActiveTags() async {
+    return await _db.getActiveTags();
+  }
+
+  /// Add a new tag
+  Future<void> addTag(String name) async {
+    await _db.addTag(name);
+  }
+
+  /// Delete a tag (soft delete)
+  Future<void> deleteTag(String name) async {
+    await _db.deleteTag(name);
+  }
+
+  /// Rename a tag
+  Future<void> renameTag(String oldName, String newName) async {
+    await _db.renameTag(oldName, newName);
+    await initialize(); // Reload to update any cached data
   }
 }

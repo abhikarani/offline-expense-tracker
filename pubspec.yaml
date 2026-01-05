@@ -23,6 +23,9 @@ dependencies:
   # Date utilities
   intl: ^0.18.1
 
+  # Shared preferences for storing theme
+  shared_preferences: ^2.2.2
+
   # UI
   cupertino_icons: ^1.0.6
 
